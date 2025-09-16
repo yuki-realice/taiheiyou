@@ -6,7 +6,7 @@ from datetime import datetime
 from excel_processor import ExcelProcessor
 
 # 新しいAPIキー
-API_KEY = ""
+API_KEY = "AIzaSyDLLhJrV7WOViziM-lwgirF0lwNPfykf80"
 
 def main():
     st.title("Excel テキスト統一システム")

@@ -289,11 +289,11 @@ class ExcelProcessor:
                 extraction_data, submission_data, submission_file_path
             )
             
-            # 4シート出力ファイルを作成
+            # 4シート出力ファイルを作成　。出力が黒になるように統一
             output_path = self.create_output_file_preserve_format(
                 extraction_file_path, submission_file_path, unified_file_path, differences
             )
-            
+            self._force_black_borders(output_path)
             return output_path, differences
             
         except Exception as e:
@@ -417,3 +417,31 @@ class ExcelProcessor:
             
         except Exception as e:
             raise Exception(f"差異シート追加エラー: {str(e)}") 
+
+    def _force_black_borders(self, xlsx_path: str):
+        import openpyxl
+        from openpyxl.styles import Border, Side
+
+        wb = openpyxl.load_workbook(xlsx_path)
+        black = "FF000000"  # ARGBで黒
+        for ws in wb.worksheets:
+            for row in ws.iter_rows():
+                for cell in row:
+                    b = cell.border
+                    if not b:
+                        continue
+                    def black_side(side):
+                        if side is None:
+                            return None
+                        return Side(style=side.style, color=black)  # 線種は維持し色だけ黒
+                    cell.border = Border(
+                        left=black_side(b.left),
+                        right=black_side(b.right),
+                        top=black_side(b.top),
+                        bottom=black_side(b.bottom),
+                        diagonal=black_side(b.diagonal),
+                        vertical=black_side(b.vertical),
+                        horizontal=black_side(b.horizontal),
+                    )
+        wb.save(xlsx_path)
+        wb.close() 

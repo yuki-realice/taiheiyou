@@ -10,13 +10,19 @@ class TextUnifier:
         self.api_key = api_key
         self.model = None
         self._initialize_model()
+
+        # --- 強制置換ルール（まず絶対に直したい表記をここで定義）---
+        # 必要に応じて ("置換前", "置換後") を追加してください。
+        self.force_map: List[Tuple[str, str]] = [
+            ("量産開始時", "作業開始時"),
+        ]
     
     def _initialize_model(self):
         """Gemini APIモデルの初期化"""
         try:
             genai.configure(api_key=self.api_key)
             self.model = genai.GenerativeModel('gemini-1.5-flash')
-        except Exception as e:
+        except Exception:
             # ここで例外を投げず、AIなしでも動けるようにする
             self.model = None
 
@@ -61,19 +67,45 @@ class TextUnifier:
                             '信頼度': info['confidence']
                         })
         return unified_df, differences
+
+    # --- 強制置換の適用 ---
+    def _apply_force_map(self, text: str) -> Tuple[str, Dict]:
+        """
+        強制置換ルールを適用する。
+        置換が発生したら (置換後テキスト, 修正情報) を返す。なければ (元テキスト, None)。
+        """
+        new_text = text
+        applied = []
+        for src, dst in self.force_map:
+            if src in new_text:
+                new_text = new_text.replace(src, dst)
+                applied.append((src, dst))
+        if applied:
+            pairs = ", ".join([f"{s}→{d}" for s, d in applied])
+            return new_text, {
+                "reason": f"強制置換ルール適用（{pairs}）",
+                "confidence": 1.0
+            }
+        return text, None
     
     # ===== セル値の統一ロジック =====
     def _unify_single_text(self, target_text: str, extraction_texts: List[str]) -> Tuple[str, Dict]:
         """
         単一セルの統一処理：
+        0) 強制置換ルールを最初に適用（ここで確実に直す）
         1) 抽出側に完全一致があればそのまま
         2) 近い候補を探索 → 【AI不要の安全判定】で即修正 or AIで最終確認
         """
-        # 完全一致
+        # 0) まず強制置換を適用
+        forced_text, forced_info = self._apply_force_map(target_text)
+        if forced_info:
+            return forced_text, forced_info
+
+        # 1) 完全一致
         if target_text in extraction_texts:
             return target_text, None
         
-        # 類似候補検索
+        # 2) 類似候補検索
         matching = self._find_semantically_matching_extraction(target_text, extraction_texts)
         if not matching:
             return target_text, None
@@ -126,7 +158,6 @@ class TextUnifier:
             }
 
         # ---- AI不許可/AI不在時のフォールバック ----
-        # 専門用語の置換は避ける安全判定
         if self._is_safe_to_convert(target_text, candidate, sim) and sim >= 0.75:
             unified = self._apply_partial_replacement(target_text, candidate)
             return unified, {
@@ -252,7 +283,7 @@ class TextUnifier:
                     result += {'ﾊ':'パ','ﾋ':'ピ','ﾌ':'プ','ﾍ':'ペ','ﾎ':'ポ'}.get(ch, ch+nxt)
                     i += 1
                 else:
-                    result += {'ｱ':'ア','ｲ':'イ','ｳ':'ウ','ｴ':'エ','ｵ':'オ','ｶ':'カ','ｷ':'キ','ｸ':'ク','ｹ':'ケ','ｺ':'コ','ｻ':'サ','ｼ':'シ','ｽ':'ス','ｾ':'セ','ｿ':'ソ','ﾀ':'タ','ﾁ':'チ','ﾂ':'ツ','ﾃ':'ツ','ﾄ':'ト','ﾅ':'ナ','ﾆ':'ニ','ﾇ':'ヌ','ﾈ':'ネ','ﾉ':'ノ','ﾊ':'ハ','ﾋ':'ヒ','ﾌ':'フ','ﾍ':'ヘ','ﾎ':'ホ','ﾏ':'マ','ﾐ':'ミ','ﾑ':'ム','ﾒ':'メ','ﾓ':'モ','ﾔ':'ヤ','ﾕ':'ユ','ﾖ':'ヨ','ﾗ':'ラ','ﾘ':'リ','ﾙ':'ル','ﾚ':'レ','ﾛ':'ロ','ﾜ':'ワ','ﾝ':'ン','ｧ':'ァ','ｨ':'ィ','ｩ':'ゥ','ｪ':'ェ','ｫ':'ォ','ｯ':'ッ','ｬ':'ャ','ｭ':'ュ','ｮ':'ョ'}.get(ch, ch)
+                    result += {'ｱ':'ア','ｲ':'イ','ｳ':'ウ','ｴ':'エ','ｵ':'オ','ｶ':'カ','ｷ':'キ','ｸ':'ク','ｹ':'ケ','ｺ':'コ','ｻ':'サ','ｼ':'シ','ｽ':'ス','ｾ':'セ','ｿ':'ソ','ﾀ':'タ','ﾁ':'チ','ﾂ':'ツ','ﾃ':'テ','ﾄ':'ト','ﾅ':'ナ','ﾆ':'ニ','ﾇ':'ヌ','ﾈ':'ネ','ﾉ':'ノ','ﾊ':'ハ','ﾋ':'ヒ','ﾌ':'フ','ﾍ':'ヘ','ﾎ':'ホ','ﾏ':'マ','ﾐ':'ミ','ﾑ':'ム','ﾒ':'メ','ﾓ':'モ','ﾔ':'ヤ','ﾕ':'ユ','ﾖ':'ヨ','ﾗ':'ラ','ﾘ':'リ','ﾙ':'ル','ﾚ':'レ','ﾛ':'ロ','ﾜ':'ワ','ﾝ':'ン','ｧ':'ァ','ｨ':'ィ','ｩ':'ゥ','ｪ':'ェ','ｫ':'ォ','ｯ':'ッ','ｬ':'ャ','ｭ':'ュ','ｮ':'ョ'}.get(ch, ch)
             else:
                 result += ch
             i += 1
